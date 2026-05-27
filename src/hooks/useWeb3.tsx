@@ -30,10 +30,6 @@ type RpcCacheEntry = {
 }
 
 const gasSettings = {
-    42220: {
-        maxFeePerGas: BigNumber.from(25.001e9).toHexString(),
-        maxPriorityFeePerGas: BigNumber.from(2.5e9).toHexString(),
-    },
     122: { maxFeePerGas: BigNumber.from(11e9).toHexString() },
     // 50: { maxFeePerGas: BigNumber.from(12.5e9).toHexString() }, // eip-1559 is only supported on XDC testnet. Last checked 15 november 2025.
 }
@@ -223,6 +219,22 @@ export const initializeRpcs = async () => {
 
 export function useNetwork(): NetworkSettings {
     const [testifiedRpcs, setTestifiedRpcs] = React.useState<Record<string, string[]> | null>(null)
+    const excludedRpcs = useMemo(
+        () =>
+            (process.env.REACT_APP_EXCLUDED_RPCS ?? '')
+                .split(',')
+                .map((value) => value.trim().toLowerCase())
+                .filter(Boolean),
+        []
+    )
+
+    const filterBlockedRpcs = (rpcs: Record<string, string[]>) =>
+        Object.fromEntries(
+            Object.entries(rpcs).map(([chainId, urls]) => [
+                chainId,
+                urls.filter((url) => !excludedRpcs.some((blocked) => url.toLowerCase().includes(blocked))),
+            ])
+        )
 
     const celoRpcList = sample(process.env.REACT_APP_CELO_RPC?.split(',')) ?? 'https://forno.celo.org'
     const fuseRpcList = sample(process.env.REACT_APP_FUSE_RPC?.split(',')) ?? 'https://rpc.fuse.io'
@@ -242,7 +254,7 @@ export function useNetwork(): NetworkSettings {
 
     useEffect(() => {
         void initializeRpcs().then((rpcs) => {
-            setTestifiedRpcs(rpcs)
+            setTestifiedRpcs(filterBlockedRpcs(rpcs))
         })
     }, [])
 
@@ -288,13 +300,8 @@ export function Web3ContextProvider({ children }: { children: ReactNode | ReactN
             if (method === 'eth_sendTransaction' && !isMiniPayWallet && chainId && chainId in gasSettings) {
                 const gasSettingsForChain = gasSettings[Number(chainId)]
                 if (gasSettingsForChain) {
-                    if (!params[0].maxFeePerGas && Number(chainId) !== 50) {
-                        // params[0].gasPrice = gasPriceSettings[chainId].maxFeePerGas
-                        delete params[0].gasPrice
-                        params[0] = { ...params[0], ...gasSettingsForChain }
-                    } else {
-                        params[0] = { ...params[0], ...gasSettingsForChain }
-                    }
+                    delete params[0].gasPrice
+                    params[0] = { ...params[0], ...gasSettingsForChain }
                 }
             }
             return webprovider.jsonRpcFetchFunc(method, params)
